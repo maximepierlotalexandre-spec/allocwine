@@ -401,6 +401,7 @@ select:focus {
 }
 
 .criterion-cell span,
+.ai-score-cell small,
 .criterion-cell small {
   color: var(--muted);
   font-size: 12px;
@@ -422,6 +423,13 @@ select:focus {
 .criterion-cell small {
   grid-column: 1 / -1;
   margin-top: -5px;
+  text-align: center;
+}
+
+.ai-score-cell {
+  display: grid;
+  gap: 5px;
+  min-width: 94px;
   text-align: center;
 }
 

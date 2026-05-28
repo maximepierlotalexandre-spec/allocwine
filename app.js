@@ -3,10 +3,50 @@ const STORAGE_KEY = "allocwine.workspace.v1";
 const initialState = {
   selectedClientId: "firadis",
   cuvees: [
-    { id: "origine", name: "Origine", volume: 45000, price: 15, cost: 7.5, rarity: 4, image: 7 },
-    { id: "solera", name: "Solera", volume: 30000, price: 22, cost: 9, rarity: 7, image: 9 },
-    { id: "vignes-nuit", name: "Les Vignes de Nuit", volume: 1800, price: 49, cost: 15, rarity: 10, image: 10 },
-    { id: "clos-ambre", name: "Clos Ambré", volume: 6200, price: 34, cost: 13, rarity: 8, image: 8 }
+    {
+      id: "origine",
+      name: "Origine",
+      volume: 45000,
+      price: 15,
+      cost: 7.5,
+      rarity: 4,
+      image: 7,
+      cuveeAiUpdatedAt: "",
+      cuveeAiSignal: "Analyse IA à générer à partir des sources vin."
+    },
+    {
+      id: "solera",
+      name: "Solera",
+      volume: 30000,
+      price: 22,
+      cost: 9,
+      rarity: 7,
+      image: 9,
+      cuveeAiUpdatedAt: "",
+      cuveeAiSignal: "Analyse IA à générer à partir des sources vin."
+    },
+    {
+      id: "vignes-nuit",
+      name: "Les Vignes de Nuit",
+      volume: 1800,
+      price: 49,
+      cost: 15,
+      rarity: 10,
+      image: 10,
+      cuveeAiUpdatedAt: "",
+      cuveeAiSignal: "Analyse IA à générer à partir des sources vin."
+    },
+    {
+      id: "clos-ambre",
+      name: "Clos Ambré",
+      volume: 6200,
+      price: 34,
+      cost: 13,
+      rarity: 8,
+      image: 8,
+      cuveeAiUpdatedAt: "",
+      cuveeAiSignal: "Analyse IA à générer à partir des sources vin."
+    }
   ],
   markets: [
     {
@@ -162,6 +202,13 @@ function loadState() {
 }
 
 function normalizeState(nextState) {
+  nextState.cuvees = nextState.cuvees.map((cuvee) => ({
+    ...cuvee,
+    rarity: cuvee.rarity ?? 5,
+    image: cuvee.image ?? 5,
+    cuveeAiUpdatedAt: cuvee.cuveeAiUpdatedAt ?? "",
+    cuveeAiSignal: cuvee.cuveeAiSignal ?? "Analyse IA à générer à partir des sources vin."
+  }));
   nextState.markets = nextState.markets.map((market) => ({
     ...market,
     economic: market.economic ?? market.risk ?? 5,
@@ -336,12 +383,17 @@ function renderCuvees() {
         <td>${input("cuvee", cuvee.id, "volume", cuvee.volume, "number")}</td>
         <td>${input("cuvee", cuvee.id, "price", cuvee.price, "number")}</td>
         <td>${input("cuvee", cuvee.id, "cost", cuvee.cost, "number")}</td>
-        <td>${input("cuvee", cuvee.id, "rarity", cuvee.rarity, "number")}</td>
-        <td>${input("cuvee", cuvee.id, "image", cuvee.image, "number")}</td>
+        <td>${aiScoreBlock(cuvee.rarity)}</td>
+        <td>${aiScoreBlock(cuvee.image)}</td>
+        <td>
+          <button class="secondary-action compact-action" type="button" data-ai-cuvee="${cuvee.id}">Noter par IA</button>
+          <small class="ai-signal">${escapeHtml(cuvee.cuveeAiSignal)}</small>
+          ${cuvee.cuveeAiUpdatedAt ? `<small class="ai-date">Mis à jour ${escapeHtml(cuvee.cuveeAiUpdatedAt)}</small>` : ""}
+        </td>
         <td><button class="danger-action" type="button" data-delete="cuvee" data-id="${cuvee.id}">Supprimer</button></td>
       </tr>
     `)
-    .join("") || emptyRow(7);
+    .join("") || emptyRow(8);
 }
 
 function renderMarkets() {
@@ -453,6 +505,15 @@ function input(type, id, field, value, inputType = "text") {
   return `<input type="${inputType}" value="${escapeHtml(value)}" data-edit="${type}" data-id="${id}" data-field="${field}" ${inputType === "number" ? 'min="0" max="1000000" step="0.1"' : ""}>`;
 }
 
+function aiScoreBlock(value) {
+  return `
+    <div class="ai-score-cell">
+      <strong class="ai-score">${Number(value || 0).toFixed(1)}</strong>
+      <small>note IA</small>
+    </div>
+  `;
+}
+
 function criterionControl(type, id, toggleField, valueField, checked, value) {
   return `
     <label class="criterion-cell">
@@ -503,7 +564,40 @@ function showTab(tabId) {
 }
 
 function addCuvee() {
-  state.cuvees.push({ id: createId("cuvee"), name: "Nouvelle cuvée", volume: 1200, price: 24, cost: 9, rarity: 6, image: 7 });
+  state.cuvees.push({
+    id: createId("cuvee"),
+    name: "Nouvelle cuvée",
+    volume: 1200,
+    price: 24,
+    cost: 9,
+    rarity: 5,
+    image: 5,
+    cuveeAiUpdatedAt: "",
+    cuveeAiSignal: "Analyse IA à générer à partir des sources vin."
+  });
+  render();
+}
+
+function runCuveeAi(cuveeId) {
+  const cuvee = state.cuvees.find((item) => item.id === cuveeId);
+  if (!cuvee) return;
+
+  const profile = estimateCuveeProfile(cuvee);
+  cuvee.rarity = profile.rarity;
+  cuvee.image = profile.image;
+  cuvee.cuveeAiSignal = profile.signal;
+  cuvee.cuveeAiUpdatedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  render();
+}
+
+function runAllCuveeAi() {
+  state.cuvees.forEach((cuvee) => {
+    const profile = estimateCuveeProfile(cuvee);
+    cuvee.rarity = profile.rarity;
+    cuvee.image = profile.image;
+    cuvee.cuveeAiSignal = profile.signal;
+    cuvee.cuveeAiUpdatedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  });
   render();
 }
 
@@ -615,6 +709,47 @@ function estimateMarketRisks(market) {
   };
 }
 
+function estimateCuveeProfile(cuvee) {
+  const name = String(cuvee.name || "").toLowerCase();
+  const volume = Number(cuvee.volume || 0);
+  const price = Number(cuvee.price || 0);
+  const margin = price ? ((price - Number(cuvee.cost || 0)) / price) * 10 : 4;
+  let rarity = 5;
+  let image = 5;
+
+  if (volume <= 2500) rarity += 3.2;
+  else if (volume <= 8000) rarity += 1.8;
+  else if (volume <= 25000) rarity += 0.8;
+  else rarity -= 1.0;
+
+  if (price >= 45) image += 2.4;
+  else if (price >= 30) image += 1.5;
+  else if (price >= 20) image += 0.7;
+
+  image += clamp(margin, 0, 10) * 0.12;
+
+  if (name.includes("clos") || name.includes("vignes") || name.includes("nuit") || name.includes("solera")) {
+    rarity += 0.8;
+    image += 1.0;
+  }
+  if (name.includes("origine") || name.includes("tradition")) {
+    rarity -= 0.6;
+    image += 0.3;
+  }
+
+  const finalProfile = {
+    rarity: clamp(rarity, 1, 10),
+    image: clamp(image, 1, 10)
+  };
+  const sourcePlan = "sources prévues : Wine-Searcher, Vivino, sites importateurs, fiches domaine, presse vin et historiques de prix";
+  const strongest = finalProfile.rarity >= finalProfile.image ? `rareté (${finalProfile.rarity.toFixed(1)}/10)` : `image (${finalProfile.image.toFixed(1)}/10)`;
+
+  return {
+    ...finalProfile,
+    signal: `IA cuvée : facteur dominant ${strongest}. Simulation locale aujourd'hui, connectable ensuite aux recherches web (${sourcePlan}).`
+  };
+}
+
 function addClient() {
   state.clients.push({
     id: createId("client"),
@@ -640,11 +775,13 @@ document.addEventListener("click", (event) => {
   const deleteButton = event.target.closest("[data-delete]");
   const viewClientButton = event.target.closest("[data-view-client]");
   const aiMarketButton = event.target.closest("[data-ai-market]");
+  const aiCuveeButton = event.target.closest("[data-ai-cuvee]");
 
   if (tabButton) showTab(tabButton.dataset.tab);
   if (openTabButton) showTab(openTabButton.dataset.openTab);
   if (deleteButton) deleteRecord(deleteButton.dataset.delete, deleteButton.dataset.id);
   if (aiMarketButton) runMarketAi(aiMarketButton.dataset.aiMarket);
+  if (aiCuveeButton) runCuveeAi(aiCuveeButton.dataset.aiCuvee);
   if (viewClientButton) {
     state.selectedClientId = viewClientButton.dataset.viewClient;
     render();
@@ -660,6 +797,7 @@ dom.clientSelector.addEventListener("change", (event) => {
 document.querySelector("#addCuvee").addEventListener("click", addCuvee);
 document.querySelector("#addMarket").addEventListener("click", addMarket);
 document.querySelector("#addClient").addEventListener("click", addClient);
+document.querySelector("#analyzeCuvees").addEventListener("click", runAllCuveeAi);
 document.querySelector("#analyzeMarkets").addEventListener("click", runAllMarketAi);
 
 render();
