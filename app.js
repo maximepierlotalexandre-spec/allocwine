@@ -15,8 +15,15 @@ const initialState = {
       image: 9,
       potential: 8,
       risk: 3,
+      economic: 3,
       transport: 4,
       currency: 4,
+      conflict: 2,
+      useEconomicRisk: true,
+      useTransportRisk: true,
+      useCurrencyRisk: true,
+      useConflictRisk: true,
+      aiSignal: "Risque faible à modéré : marché stable, dépendance au transport longue distance.",
       context: "Marché prescripteur, stable, très sensible à la précision de l'allocation."
     },
     {
@@ -25,8 +32,15 @@ const initialState = {
       image: 8,
       potential: 10,
       risk: 5,
+      economic: 5,
       transport: 6,
       currency: 6,
+      conflict: 4,
+      useEconomicRisk: true,
+      useTransportRisk: true,
+      useCurrencyRisk: true,
+      useConflictRisk: true,
+      aiSignal: "Risque moyen : surveiller devise, tarifs, coûts logistiques et tensions commerciales.",
       context: "Fort potentiel premium, mais coûts logistiques, devise et réglementation à surveiller."
     },
     {
@@ -35,8 +49,15 @@ const initialState = {
       image: 8,
       potential: 7,
       risk: 4,
+      economic: 4,
       transport: 4,
       currency: 5,
+      conflict: 3,
+      useEconomicRisk: true,
+      useTransportRisk: true,
+      useCurrencyRisk: true,
+      useConflictRisk: true,
+      aiSignal: "Risque modéré : pression économique et devise à intégrer dans les volumes.",
       context: "Bon réseau CHR et cavistes, pression prix plus visible sur les cuvées d'entrée."
     },
     {
@@ -45,8 +66,15 @@ const initialState = {
       image: 7,
       potential: 6,
       risk: 2,
+      economic: 2,
       transport: 2,
       currency: 1,
+      conflict: 1,
+      useEconomicRisk: true,
+      useTransportRisk: true,
+      useCurrencyRisk: false,
+      useConflictRisk: true,
+      aiSignal: "Risque faible : marché domestique, exposition logistique et devise limitée.",
       context: "Marché historique, utile pour l'image locale et la fidélité, marge parfois plus contenue."
     }
   ],
@@ -98,7 +126,7 @@ const initialState = {
   ]
 };
 
-let state = loadState();
+let state = normalizeState(loadState());
 
 const dom = {
   tabs: document.querySelectorAll(".tab"),
@@ -127,6 +155,22 @@ function loadState() {
   } catch {
     return structuredClone(initialState);
   }
+}
+
+function normalizeState(nextState) {
+  nextState.markets = nextState.markets.map((market) => ({
+    ...market,
+    economic: market.economic ?? market.risk ?? 5,
+    transport: market.transport ?? 5,
+    currency: market.currency ?? 5,
+    conflict: market.conflict ?? market.risk ?? 5,
+    useEconomicRisk: market.useEconomicRisk ?? true,
+    useTransportRisk: market.useTransportRisk ?? true,
+    useCurrencyRisk: market.useCurrencyRisk ?? true,
+    useConflictRisk: market.useConflictRisk ?? true,
+    aiSignal: market.aiSignal ?? "Analyse IA à générer."
+  }));
+  return nextState;
 }
 
 function persist() {
@@ -168,7 +212,7 @@ const allocationEngine = {
     const margin = this.grossMargin(cuvee) * 0.52 + Number(client.margin) * 0.48;
     const brandFit = Number(cuvee.image) * 0.34 + Number(market.image) * 0.36 + Number(client.network) * 0.30;
     const relationship = Number(client.history) * 0.55 + Number(client.payment) * 0.45;
-    const riskPenalty = (Number(market.risk) * 0.45 + Number(market.transport) * 0.28 + Number(market.currency) * 0.27) * 0.16;
+    const riskPenalty = this.riskPenalty(market);
     const rarityBonus = Number(cuvee.rarity) >= 8 && Number(client.strategicPotential) >= 8 ? 0.28 : 0;
 
     return clamp(
@@ -180,6 +224,16 @@ const allocationEngine = {
         riskPenalty +
         rarityBonus
     );
+  },
+
+  riskPenalty(market) {
+    const activeRisks = [
+      market.useEconomicRisk ? Number(market.economic) * 0.30 : 0,
+      market.useTransportRisk ? Number(market.transport) * 0.25 : 0,
+      market.useCurrencyRisk ? Number(market.currency) * 0.20 : 0,
+      market.useConflictRisk ? Number(market.conflict) * 0.25 : 0
+    ];
+    return activeRisks.reduce((sum, value) => sum + value, 0) * 0.18;
   },
 
   volume(cuvee, score) {
@@ -292,14 +346,19 @@ function renderMarkets() {
         <td>${input("market", market.id, "country", market.country)}</td>
         <td>${input("market", market.id, "image", market.image, "number")}</td>
         <td>${input("market", market.id, "potential", market.potential, "number")}</td>
-        <td>${input("market", market.id, "risk", market.risk, "number")}</td>
-        <td>${input("market", market.id, "transport", market.transport, "number")}</td>
-        <td>${input("market", market.id, "currency", market.currency, "number")}</td>
+        <td>${criterionControl("market", market.id, "useEconomicRisk", "economic", market.useEconomicRisk, market.economic)}</td>
+        <td>${criterionControl("market", market.id, "useTransportRisk", "transport", market.useTransportRisk, market.transport)}</td>
+        <td>${criterionControl("market", market.id, "useCurrencyRisk", "currency", market.useCurrencyRisk, market.currency)}</td>
+        <td>${criterionControl("market", market.id, "useConflictRisk", "conflict", market.useConflictRisk, market.conflict)}</td>
+        <td>
+          <button class="secondary-action compact-action" type="button" data-ai-market="${market.id}">Analyser</button>
+          <small class="ai-signal">${escapeHtml(market.aiSignal)}</small>
+        </td>
         <td>${input("market", market.id, "context", market.context)}</td>
         <td><button class="danger-action" type="button" data-delete="market" data-id="${market.id}">Supprimer</button></td>
       </tr>
     `)
-    .join("") || emptyRow(8);
+    .join("") || emptyRow(10);
 }
 
 function renderClients() {
@@ -351,9 +410,10 @@ function renderClientView() {
   dom.clientScore.textContent = avg ? avg.toFixed(1) : "-";
   dom.clientVolume.textContent = `${formatNumber(total)} bt`;
   dom.clientRows.innerHTML = rows.map(renderClientRecommendationRow).join("") || emptyRow(6);
+  const activeRisks = riskLabels(market);
   dom.clientAnalysis.innerHTML = `
     <strong>Analyse automatique</strong>
-    <p>${escapeHtml(selectedClient.name)} reçoit une proposition calibrée pour ${escapeHtml(market?.country || "-")}. ${escapeHtml(market?.context || "")} Les cuvées rares sont volontairement limitées afin de préserver l'image et la rareté, tout en donnant assez de volume aux partenaires capables de créer de la demande durable.</p>
+    <p>${escapeHtml(selectedClient.name)} reçoit une proposition calibrée pour ${escapeHtml(market?.country || "-")}. ${escapeHtml(market?.context || "")} Critères de risque actifs : ${escapeHtml(activeRisks)}. ${escapeHtml(market?.aiSignal || "")} Les cuvées rares sont volontairement limitées afin de préserver l'image et la rareté, tout en donnant assez de volume aux partenaires capables de créer de la demande durable.</p>
   `;
 }
 
@@ -387,6 +447,25 @@ function input(type, id, field, value, inputType = "text") {
   return `<input type="${inputType}" value="${escapeHtml(value)}" data-edit="${type}" data-id="${id}" data-field="${field}" ${inputType === "number" ? 'min="0" max="1000000" step="0.1"' : ""}>`;
 }
 
+function criterionControl(type, id, toggleField, valueField, checked, value) {
+  return `
+    <label class="criterion-cell">
+      <input type="checkbox" ${checked ? "checked" : ""} data-edit="${type}" data-id="${id}" data-field="${toggleField}">
+      <span>Inclure</span>
+      ${input(type, id, valueField, value, "number")}
+    </label>
+  `;
+}
+
+function riskLabels(market) {
+  const labels = [];
+  if (market?.useEconomicRisk) labels.push("contexte économique et aléas");
+  if (market?.useTransportRisk) labels.push("transport et tarifs");
+  if (market?.useCurrencyRisk) labels.push("taux de change");
+  if (market?.useConflictRisk) labels.push("conflits actuels et risque géopolitique");
+  return labels.length ? labels.join(", ") : "aucun risque externe activé";
+}
+
 function emptyRow(colspan) {
   return `<tr><td class="empty-state" colspan="${colspan}">Aucune donnée pour le moment.</td></tr>`;
 }
@@ -396,8 +475,8 @@ function updateField(target) {
   const record = state[collection].find((item) => item.id === target.dataset.id);
   if (!record) return;
 
-  const numericFields = ["volume", "price", "cost", "rarity", "image", "potential", "risk", "transport", "currency", "margin", "history", "network", "payment", "strategicPotential"];
-  record[target.dataset.field] = numericFields.includes(target.dataset.field) ? Number(target.value) : target.value;
+  const numericFields = ["volume", "price", "cost", "rarity", "image", "potential", "risk", "economic", "transport", "currency", "conflict", "margin", "history", "network", "payment", "strategicPotential"];
+  record[target.dataset.field] = target.type === "checkbox" ? target.checked : numericFields.includes(target.dataset.field) ? Number(target.value) : target.value;
   render();
 }
 
@@ -422,7 +501,34 @@ function addCuvee() {
 }
 
 function addMarket() {
-  state.markets.push({ id: createId("market"), country: "Nouveau marché", image: 6, potential: 6, risk: 5, transport: 5, currency: 5, context: "Contexte à préciser." });
+  state.markets.push({
+    id: createId("market"),
+    country: "Nouveau marché",
+    image: 6,
+    potential: 6,
+    risk: 5,
+    economic: 5,
+    transport: 5,
+    currency: 5,
+    conflict: 5,
+    useEconomicRisk: true,
+    useTransportRisk: true,
+    useCurrencyRisk: true,
+    useConflictRisk: true,
+    aiSignal: "Analyse IA à générer.",
+    context: "Contexte à préciser."
+  });
+  render();
+}
+
+function runMarketAi(marketId) {
+  const market = state.markets.find((item) => item.id === marketId);
+  if (!market) return;
+
+  const active = riskLabels(market);
+  const level = Number(market.economic) + Number(market.transport) + Number(market.currency) + Number(market.conflict);
+  const tone = level >= 26 ? "élevé" : level >= 16 ? "modéré" : "contenu";
+  market.aiSignal = `Pré-analyse IA : risque ${tone}. Surveiller ${active}, avec attention particulière aux conflits actuels si le critère est activé.`;
   render();
 }
 
@@ -450,10 +556,12 @@ document.addEventListener("click", (event) => {
   const openTabButton = event.target.closest("[data-open-tab]");
   const deleteButton = event.target.closest("[data-delete]");
   const viewClientButton = event.target.closest("[data-view-client]");
+  const aiMarketButton = event.target.closest("[data-ai-market]");
 
   if (tabButton) showTab(tabButton.dataset.tab);
   if (openTabButton) showTab(openTabButton.dataset.openTab);
   if (deleteButton) deleteRecord(deleteButton.dataset.delete, deleteButton.dataset.id);
+  if (aiMarketButton) runMarketAi(aiMarketButton.dataset.aiMarket);
   if (viewClientButton) {
     state.selectedClientId = viewClientButton.dataset.viewClient;
     render();
