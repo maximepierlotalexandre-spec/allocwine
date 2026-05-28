@@ -23,6 +23,7 @@ const initialState = {
       useTransportRisk: true,
       useCurrencyRisk: true,
       useConflictRisk: true,
+      aiUpdatedAt: "",
       aiSignal: "Risque faible à modéré : marché stable, dépendance au transport longue distance.",
       context: "Marché prescripteur, stable, très sensible à la précision de l'allocation."
     },
@@ -40,6 +41,7 @@ const initialState = {
       useTransportRisk: true,
       useCurrencyRisk: true,
       useConflictRisk: true,
+      aiUpdatedAt: "",
       aiSignal: "Risque moyen : surveiller devise, tarifs, coûts logistiques et tensions commerciales.",
       context: "Fort potentiel premium, mais coûts logistiques, devise et réglementation à surveiller."
     },
@@ -57,6 +59,7 @@ const initialState = {
       useTransportRisk: true,
       useCurrencyRisk: true,
       useConflictRisk: true,
+      aiUpdatedAt: "",
       aiSignal: "Risque modéré : pression économique et devise à intégrer dans les volumes.",
       context: "Bon réseau CHR et cavistes, pression prix plus visible sur les cuvées d'entrée."
     },
@@ -74,6 +77,7 @@ const initialState = {
       useTransportRisk: true,
       useCurrencyRisk: false,
       useConflictRisk: true,
+      aiUpdatedAt: "",
       aiSignal: "Risque faible : marché domestique, exposition logistique et devise limitée.",
       context: "Marché historique, utile pour l'image locale et la fidélité, marge parfois plus contenue."
     }
@@ -168,6 +172,7 @@ function normalizeState(nextState) {
     useTransportRisk: market.useTransportRisk ?? true,
     useCurrencyRisk: market.useCurrencyRisk ?? true,
     useConflictRisk: market.useConflictRisk ?? true,
+    aiUpdatedAt: market.aiUpdatedAt ?? "",
     aiSignal: market.aiSignal ?? "Analyse IA à générer."
   }));
   return nextState;
@@ -351,8 +356,9 @@ function renderMarkets() {
         <td>${criterionControl("market", market.id, "useCurrencyRisk", "currency", market.useCurrencyRisk, market.currency)}</td>
         <td>${criterionControl("market", market.id, "useConflictRisk", "conflict", market.useConflictRisk, market.conflict)}</td>
         <td>
-          <button class="secondary-action compact-action" type="button" data-ai-market="${market.id}">Analyser</button>
+          <button class="secondary-action compact-action" type="button" data-ai-market="${market.id}">Noter par IA</button>
           <small class="ai-signal">${escapeHtml(market.aiSignal)}</small>
+          ${market.aiUpdatedAt ? `<small class="ai-date">Mis à jour ${escapeHtml(market.aiUpdatedAt)}</small>` : ""}
         </td>
         <td>${input("market", market.id, "context", market.context)}</td>
         <td><button class="danger-action" type="button" data-delete="market" data-id="${market.id}">Supprimer</button></td>
@@ -452,7 +458,8 @@ function criterionControl(type, id, toggleField, valueField, checked, value) {
     <label class="criterion-cell">
       <input type="checkbox" ${checked ? "checked" : ""} data-edit="${type}" data-id="${id}" data-field="${toggleField}">
       <span>Inclure</span>
-      ${input(type, id, valueField, value, "number")}
+      <strong class="ai-score">${Number(value || 0).toFixed(1)}</strong>
+      <small>note IA</small>
     </label>
   `;
 }
@@ -515,6 +522,7 @@ function addMarket() {
     useTransportRisk: true,
     useCurrencyRisk: true,
     useConflictRisk: true,
+    aiUpdatedAt: "",
     aiSignal: "Analyse IA à générer.",
     context: "Contexte à préciser."
   });
@@ -525,11 +533,86 @@ function runMarketAi(marketId) {
   const market = state.markets.find((item) => item.id === marketId);
   if (!market) return;
 
-  const active = riskLabels(market);
-  const level = Number(market.economic) + Number(market.transport) + Number(market.currency) + Number(market.conflict);
-  const tone = level >= 26 ? "élevé" : level >= 16 ? "modéré" : "contenu";
-  market.aiSignal = `Pré-analyse IA : risque ${tone}. Surveiller ${active}, avec attention particulière aux conflits actuels si le critère est activé.`;
+  const aiNotes = estimateMarketRisks(market);
+  market.economic = aiNotes.economic;
+  market.transport = aiNotes.transport;
+  market.currency = aiNotes.currency;
+  market.conflict = aiNotes.conflict;
+  market.aiSignal = aiNotes.signal;
+  market.aiUpdatedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
   render();
+}
+
+function runAllMarketAi() {
+  state.markets.forEach((market) => {
+    const aiNotes = estimateMarketRisks(market);
+    market.economic = aiNotes.economic;
+    market.transport = aiNotes.transport;
+    market.currency = aiNotes.currency;
+    market.conflict = aiNotes.conflict;
+    market.aiSignal = aiNotes.signal;
+    market.aiUpdatedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  });
+  render();
+}
+
+function estimateMarketRisks(market) {
+  const text = `${market.country} ${market.context}`.toLowerCase();
+  let economic = 4.5;
+  let transport = 4.5;
+  let currency = 4.5;
+  let conflict = 3.5;
+
+  if (text.includes("france") || text.includes("domestique")) {
+    economic -= 1.4;
+    transport -= 2.2;
+    currency -= 3.2;
+    conflict -= 1.5;
+  }
+  if (text.includes("japon")) {
+    economic -= 0.6;
+    transport += 1.0;
+    currency += 0.6;
+    conflict -= 0.5;
+  }
+  if (text.includes("états-unis") || text.includes("usa") || text.includes("united states")) {
+    economic += 0.8;
+    transport += 1.2;
+    currency += 1.0;
+    conflict += 0.7;
+  }
+  if (text.includes("royaume-uni") || text.includes("uk")) {
+    economic += 0.5;
+    transport += 0.3;
+    currency += 0.9;
+    conflict += 0.2;
+  }
+
+  if (text.includes("tarif") || text.includes("douane") || text.includes("réglementation")) transport += 0.8;
+  if (text.includes("devise") || text.includes("change")) currency += 0.9;
+  if (text.includes("pression prix") || text.includes("ralentissement")) economic += 0.8;
+  if (text.includes("conflit") || text.includes("géopolitique") || text.includes("tension")) conflict += 1.4;
+
+  const notes = {
+    economic: clamp(economic, 1, 10),
+    transport: clamp(transport, 1, 10),
+    currency: clamp(currency, 1, 10),
+    conflict: clamp(conflict, 1, 10)
+  };
+  const globalRisk = notes.economic + notes.transport + notes.currency + notes.conflict;
+  const tone = globalRisk >= 26 ? "élevé" : globalRisk >= 18 ? "modéré" : "contenu";
+  const strongest = Object.entries(notes).sort((a, b) => b[1] - a[1])[0];
+  const labels = {
+    economic: "contexte économique",
+    transport: "transport et tarifs",
+    currency: "taux de change",
+    conflict: "conflits actuels et géopolitique"
+  };
+
+  return {
+    ...notes,
+    signal: `IA allocation : risque ${tone}. Principal facteur détecté : ${labels[strongest[0]]} (${strongest[1].toFixed(1)}/10). Les notes sont recalculées à partir du pays, du contexte marché et des signaux de coût/risque saisis.`
+  };
 }
 
 function addClient() {
@@ -577,5 +660,6 @@ dom.clientSelector.addEventListener("change", (event) => {
 document.querySelector("#addCuvee").addEventListener("click", addCuvee);
 document.querySelector("#addMarket").addEventListener("click", addMarket);
 document.querySelector("#addClient").addEventListener("click", addClient);
+document.querySelector("#analyzeMarkets").addEventListener("click", runAllMarketAi);
 
 render();
