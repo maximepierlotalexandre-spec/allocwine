@@ -195,7 +195,7 @@
           <label class="upload-zone" for="salesFile">
             <span>Importer un fichier Excel</span>
             <strong>Déposer les ventes N-1</strong>
-            <small>Format attendu : client, code article, CA HT, marge, quantité.</small>
+            <small>Format attendu : client, pays, cuvée, CA HT, marge, quantité.</small>
             <input id="salesFile" type="file" accept=".xlsx,.xls">
           </label>
           <div class="import-status" id="importStatus">Aucun fichier importé pour le moment.</div>
@@ -240,7 +240,9 @@
             <thead>
               <tr>
                 <th>Client</th>
+                <th>Pays</th>
                 <th>Code article</th>
+                <th>Cuvée</th>
                 <th>CA HT</th>
                 <th>Marge</th>
                 <th>Quantité</th>

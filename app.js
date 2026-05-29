@@ -303,9 +303,21 @@ function articleMatchesCuvee(articleCode, cuveeName) {
   return article.includes(cuvee) || cuvee.includes(article) || cuvee.split(" ").some((part) => part.length > 3 && article.includes(part));
 }
 
+function saleMatchesCuvee(row, cuvee) {
+  const importedCode = normalizeText(cuvee.importedCode);
+  const rowCode = normalizeText(row.articleCode);
+  const rowName = normalizeText(row.cuveeName);
+  const cuveeName = normalizeText(cuvee.name);
+  return (
+    (importedCode && rowCode && importedCode === rowCode) ||
+    (rowName && (rowName === cuveeName || rowName.includes(cuveeName) || cuveeName.includes(rowName))) ||
+    (rowCode && articleMatchesCuvee(rowCode, cuvee.name))
+  );
+}
+
 function previousVolumeForCuvee(client, cuvee) {
   const rows = salesForClient(client);
-  const matchedRows = rows.filter((row) => row.articleCode && articleMatchesCuvee(row.articleCode, cuvee.name));
+  const matchedRows = rows.filter((row) => saleMatchesCuvee(row, cuvee));
   if (matchedRows.length) {
     return matchedRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
   }
@@ -509,12 +521,14 @@ function renderHistory() {
   dom.historyRowsTable.innerHTML = rows.slice(0, 60).map((row) => `
     <tr>
       <td>${escapeHtml(row.clientName)}</td>
+      <td>${escapeHtml(row.countryName || "-")}</td>
       <td>${escapeHtml(row.articleCode || "-")}</td>
+      <td>${escapeHtml(row.cuveeName || "-")}</td>
       <td>${formatCurrency(row.turnover)}</td>
       <td>${formatCurrency(row.margin)}</td>
       <td>${formatNumber(row.quantity)}</td>
     </tr>
-  `).join("") || emptyRow(5);
+  `).join("") || emptyRow(7);
 }
 
 function renderCuvees() {
@@ -929,10 +943,12 @@ async function handleSalesFile(file) {
     state.previousSales = rows;
     state.previousSalesFileName = file.name;
     state.previousSalesImportedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const marketCount = createMarketsFromImportedSales(rows);
+    const cuveeCount = createCuveesFromImportedSales(rows);
     const createdCount = createClientsFromImportedSales(rows);
     render();
     showTab("history");
-    dom.importStatus.textContent = `${file.name} importé le ${state.previousSalesImportedAt}. ${createdCount} client(s) créé(s), clients existants enrichis.`;
+    dom.importStatus.textContent = `${file.name} importé le ${state.previousSalesImportedAt}. ${createdCount} client(s), ${marketCount} marché(s), ${cuveeCount} cuvée(s) créé(s). Données existantes enrichies.`;
   } catch (error) {
     dom.importStatus.textContent = `Import impossible : ${error.message}`;
   }
@@ -944,8 +960,9 @@ function createClientsFromImportedSales(rows) {
     const key = normalizeText(row.clientName);
     if (!key) return acc;
     if (!acc[key]) {
-      acc[key] = { name: row.clientName.trim(), quantity: 0, margin: 0, turnover: 0 };
+      acc[key] = { name: row.clientName.trim(), country: row.countryName || "", quantity: 0, margin: 0, turnover: 0 };
     }
+    if (row.countryName && !acc[key].country) acc[key].country = row.countryName;
     acc[key].quantity += Number(row.quantity || 0);
     acc[key].margin += Number(row.margin || 0);
     acc[key].turnover += Number(row.turnover || 0);
@@ -955,9 +972,11 @@ function createClientsFromImportedSales(rows) {
   let created = 0;
   Object.values(grouped).forEach((item) => {
     const existingClient = findClientForImportedName(item.name);
+    const marketId = marketIdForCountry(item.country);
     if (existingClient) {
       existingImportedIds.delete(existingClient.id);
       existingClient.importedName = item.name;
+      if (marketId) existingClient.marketId = marketId;
       existingClient.history = Math.max(Number(existingClient.history || 5), importedHistoryScore(item.quantity));
       existingClient.margin = Math.max(Number(existingClient.margin || 5), importedMarginScore(item.margin, item.turnover));
       return;
@@ -966,7 +985,7 @@ function createClientsFromImportedSales(rows) {
     state.clients.push({
       id: uniqueImportedClientId(item.name),
       name: item.name,
-      marketId: state.markets[0]?.id || "",
+      marketId: marketId || state.markets[0]?.id || "",
       margin: importedMarginScore(item.margin, item.turnover),
       history: importedHistoryScore(item.quantity),
       network: 5,
@@ -978,6 +997,93 @@ function createClientsFromImportedSales(rows) {
     created += 1;
   });
   state.clients = state.clients.filter((client) => !existingImportedIds.has(client.id));
+  return created;
+}
+
+function createMarketsFromImportedSales(rows) {
+  const countries = Array.from(new Set(rows.map((row) => row.countryName).filter(Boolean)));
+  let created = 0;
+  countries.forEach((country) => {
+    if (marketIdForCountry(country)) return;
+    const market = {
+      id: uniqueMarketId(country),
+      country,
+      image: 6,
+      potential: 6,
+      risk: 5,
+      economic: 5,
+      transport: 5,
+      currency: 5,
+      conflict: 5,
+      useEconomicRisk: true,
+      useTransportRisk: true,
+      useCurrencyRisk: true,
+      useConflictRisk: true,
+      aiUpdatedAt: "",
+      aiSignal: "Marché créé automatiquement depuis l'historique importé. À noter par IA.",
+      context: "Marché importé depuis les ventes N-1."
+    };
+    const aiNotes = estimateMarketRisks(market);
+    Object.assign(market, {
+      economic: aiNotes.economic,
+      transport: aiNotes.transport,
+      currency: aiNotes.currency,
+      conflict: aiNotes.conflict,
+      aiSignal: aiNotes.signal
+    });
+    state.markets.push(market);
+    created += 1;
+  });
+  return created;
+}
+
+function createCuveesFromImportedSales(rows) {
+  const grouped = rows.reduce((acc, row) => {
+    const name = row.cuveeName || row.articleCode;
+    const key = normalizeText(name);
+    if (!key) return acc;
+    if (!acc[key]) {
+      acc[key] = { name: String(name).trim(), code: row.articleCode || "", quantity: 0, turnover: 0, margin: 0 };
+    }
+    if (row.articleCode && !acc[key].code) acc[key].code = row.articleCode;
+    acc[key].quantity += Number(row.quantity || 0);
+    acc[key].turnover += Number(row.turnover || 0);
+    acc[key].margin += Number(row.margin || 0);
+    return acc;
+  }, {});
+
+  let created = 0;
+  Object.values(grouped).forEach((item) => {
+    const existing = findCuveeForImportedName(item.name, item.code);
+    const avgPrice = item.quantity ? item.turnover / item.quantity : 20;
+    const avgCost = item.quantity ? Math.max(0, (item.turnover - item.margin) / item.quantity) : Math.max(1, avgPrice * 0.55);
+    if (existing) {
+      existing.importedCode = item.code || existing.importedCode || "";
+      existing.volume = Math.max(Number(existing.volume || 0), Math.round(item.quantity || 0));
+      if (!Number(existing.price)) existing.price = roundOne(avgPrice);
+      if (!Number(existing.cost)) existing.cost = roundOne(avgCost);
+      return;
+    }
+
+    const cuvee = {
+      id: uniqueCuveeId(item.name),
+      name: item.name,
+      importedCode: item.code,
+      volume: Math.max(12, Math.round(item.quantity || 0)),
+      price: roundOne(avgPrice),
+      cost: roundOne(avgCost),
+      rarity: 5,
+      image: 5,
+      cuveeAiUpdatedAt: "",
+      cuveeAiSignal: "Cuvée créée automatiquement depuis l'historique importé."
+    };
+    const profile = estimateCuveeProfile(cuvee);
+    cuvee.rarity = profile.rarity;
+    cuvee.image = profile.image;
+    cuvee.cuveeAiSignal = profile.signal;
+    state.cuvees.push(cuvee);
+    created += 1;
+  });
   return created;
 }
 
@@ -1005,6 +1111,52 @@ function uniqueImportedClientId(name) {
   return id;
 }
 
+function marketIdForCountry(country) {
+  const target = normalizeText(country);
+  if (!target) return "";
+  return state.markets.find((market) => normalizeText(market.country) === target)?.id || "";
+}
+
+function uniqueMarketId(country) {
+  const base = `market-${normalizeText(country).replace(/\s+/g, "-").slice(0, 42) || "importe"}`;
+  let id = base;
+  let suffix = 2;
+  while (state.markets.some((market) => market.id === id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return id;
+}
+
+function findCuveeForImportedName(name, code) {
+  const targetName = normalizeText(name);
+  const targetCode = normalizeText(code);
+  return state.cuvees.find((cuvee) => {
+    const cuveeName = normalizeText(cuvee.name);
+    const cuveeCode = normalizeText(cuvee.importedCode);
+    return (
+      (targetCode && cuveeCode && targetCode === cuveeCode) ||
+      cuveeName === targetName ||
+      (targetName && (cuveeName.includes(targetName) || targetName.includes(cuveeName)))
+    );
+  });
+}
+
+function uniqueCuveeId(name) {
+  const base = `cuvee-${normalizeText(name).replace(/\s+/g, "-").slice(0, 42) || "importee"}`;
+  let id = base;
+  let suffix = 2;
+  while (state.cuvees.some((cuvee) => cuvee.id === id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return id;
+}
+
+function roundOne(value) {
+  return Math.round(Number(value || 0) * 10) / 10;
+}
+
 async function parseXlsxSalesFile(file) {
   const entries = readZipEntries(await file.arrayBuffer());
   const sharedStrings = entries["xl/sharedStrings.xml"] ? parseSharedStrings(await readZipText(entries["xl/sharedStrings.xml"])) : [];
@@ -1029,18 +1181,35 @@ function rowToSales(row, headers, sharedStrings) {
     if (column) cells[column] = cellValue(cell, sharedStrings);
   });
 
-  const values = ["A", "B", "C", "D", "E"].reduce((acc, column, index) => {
+  const columns = columnNames(headers.length);
+  const values = columns.reduce((acc, column, index) => {
     acc[headers[index] || column] = cells[column] ?? "";
     return acc;
   }, {});
 
   return {
     clientName: String(values["Nom + Prénom Client"] || values.A || "").trim(),
-    articleCode: String(values["Code article"] || values.B || "").trim(),
-    turnover: parseImportedNumber(values["TOTAL(Mt Ht)"] ?? values.C),
-    margin: parseImportedNumber(values["TOTAL(Marge)"] ?? values.D),
-    quantity: parseImportedNumber(values["TOTAL(Quantité)"] ?? values.E)
+    countryName: String(values["Pays - Lib"] || values["Pays-Lib"] || "").trim(),
+    articleCode: String(values["Cuvée - Code"] || values["Cuvée-Code"] || values["Code article"] || values.B || "").trim(),
+    cuveeName: String(values["Cuvée - Lib"] || values["Cuvée-Lib"] || "").trim(),
+    turnover: parseImportedNumber(values["TOTAL(Mt Ht)"] ?? values.C ?? values.E),
+    margin: parseImportedNumber(values["TOTAL(Marge)"] ?? values.D ?? values.F),
+    quantity: parseImportedNumber(values["TOTAL(Quantité)"] ?? values.E ?? values.G)
   };
+}
+
+function columnNames(count) {
+  const columns = [];
+  for (let i = 0; i < count; i += 1) {
+    let n = i;
+    let name = "";
+    do {
+      name = String.fromCharCode(65 + (n % 26)) + name;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    columns.push(name);
+  }
+  return columns;
 }
 
 function cellValue(cell, sharedStrings) {
