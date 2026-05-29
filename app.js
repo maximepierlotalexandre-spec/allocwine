@@ -202,7 +202,9 @@ const dom = {
   clientMarket: document.querySelector("#clientMarket"),
   clientScore: document.querySelector("#clientScore"),
   clientVolume: document.querySelector("#clientVolume"),
-  clientPreviousVolume: document.querySelector("#clientPreviousVolume")
+  clientPreviousVolume: document.querySelector("#clientPreviousVolume"),
+  clientPreviousMargin: document.querySelector("#clientPreviousMargin"),
+  clientProjectedMargin: document.querySelector("#clientProjectedMargin")
 };
 
 function loadState() {
@@ -317,6 +319,18 @@ function previousVolumeLabelForCuvee(client, cuvee) {
   const rows = salesForClient(client);
   const total = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
   return total ? `${formatNumber(total)} u. client` : "-";
+}
+
+function previousMarginForClient(client) {
+  return salesForClient(client).reduce((sum, row) => sum + Number(row.margin || 0), 0);
+}
+
+function projectedMarginForRecommendation(row) {
+  return Math.max(0, Number(row.cuvee.price || 0) - Number(row.cuvee.cost || 0)) * Number(row.volume || 0);
+}
+
+function projectedMarginForClient(rows) {
+  return rows.reduce((sum, row) => sum + projectedMarginForRecommendation(row), 0);
 }
 
 const allocationEngine = {
@@ -554,6 +568,8 @@ function renderClients() {
       const rows = allocationEngine.byClient(client);
       const previousRows = salesForClient(client);
       const previousQuantity = previousRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+      const previousMargin = previousMarginForClient(client);
+      const projectedMargin = projectedMarginForClient(rows);
       const total = rows.reduce((sum, row) => sum + row.volume, 0);
       const avg = rows.length ? rows.reduce((sum, row) => sum + row.score, 0) / rows.length : 0;
       return `
@@ -567,8 +583,9 @@ function renderClients() {
           </header>
           <dl>
             <div><dt>Volume</dt><dd>${formatNumber(total)} bt</dd></div>
-            <div><dt>Historique</dt><dd>${client.history}/10</dd></div>
+            <div><dt>Marge N</dt><dd>${formatCurrency(projectedMargin)}</dd></div>
             <div><dt>N-1</dt><dd>${previousQuantity ? `${formatNumber(previousQuantity)} u.` : "Non importé"}</dd></div>
+            <div><dt>Marge N-1</dt><dd>${previousMargin ? formatCurrency(previousMargin) : "-"}</dd></div>
           </dl>
           <button class="secondary-action" type="button" data-view-client="${client.id}">Voir recommandations</button>
         </article>
@@ -592,6 +609,8 @@ function renderClientView() {
   const total = rows.reduce((sum, row) => sum + row.volume, 0);
   const previousRows = salesForClient(selectedClient);
   const previousTotal = previousRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  const previousMargin = previousMarginForClient(selectedClient);
+  const projectedMargin = projectedMarginForClient(rows);
 
   dom.clientSelector.innerHTML = state.clients
     .map((client) => `<option value="${client.id}" ${client.id === selectedClient.id ? "selected" : ""}>${escapeHtml(client.name)}</option>`)
@@ -600,6 +619,8 @@ function renderClientView() {
   dom.clientScore.textContent = avg ? avg.toFixed(1) : "-";
   dom.clientVolume.textContent = `${formatNumber(total)} bt`;
   dom.clientPreviousVolume.textContent = previousTotal ? `${formatNumber(previousTotal)} u.` : "-";
+  dom.clientPreviousMargin.textContent = previousMargin ? formatCurrency(previousMargin) : "-";
+  dom.clientProjectedMargin.textContent = projectedMargin ? formatCurrency(projectedMargin) : "-";
   dom.clientRows.innerHTML = rows.map(renderClientRecommendationRow).join("") || emptyRow(7);
   const activeRisks = riskLabels(market);
   dom.clientAnalysis.innerHTML = `
@@ -918,6 +939,7 @@ async function handleSalesFile(file) {
 }
 
 function createClientsFromImportedSales(rows) {
+  const existingImportedIds = new Set(state.clients.filter((client) => client.importedFromHistory).map((client) => client.id));
   const grouped = rows.reduce((acc, row) => {
     const key = normalizeText(row.clientName);
     if (!key) return acc;
@@ -934,6 +956,7 @@ function createClientsFromImportedSales(rows) {
   Object.values(grouped).forEach((item) => {
     const existingClient = findClientForImportedName(item.name);
     if (existingClient) {
+      existingImportedIds.delete(existingClient.id);
       existingClient.importedName = item.name;
       existingClient.history = Math.max(Number(existingClient.history || 5), importedHistoryScore(item.quantity));
       existingClient.margin = Math.max(Number(existingClient.margin || 5), importedMarginScore(item.margin, item.turnover));
@@ -954,6 +977,7 @@ function createClientsFromImportedSales(rows) {
     });
     created += 1;
   });
+  state.clients = state.clients.filter((client) => !existingImportedIds.has(client.id));
   return created;
 }
 
