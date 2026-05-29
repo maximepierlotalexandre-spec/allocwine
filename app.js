@@ -326,11 +326,7 @@ function previousVolumeForCuvee(client, cuvee) {
 
 function previousVolumeLabelForCuvee(client, cuvee) {
   const matchedVolume = previousVolumeForCuvee(client, cuvee);
-  if (matchedVolume) return `${formatNumber(matchedVolume)} u.`;
-
-  const rows = salesForClient(client);
-  const total = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-  return total ? `${formatNumber(total)} u. client` : "-";
+  return matchedVolume ? `${formatNumber(matchedVolume)} bt` : "-";
 }
 
 function previousMarginForClient(client) {
@@ -453,7 +449,7 @@ function decisionForScore(score) {
 
 function analysisFor(cuvee, client, market, score, historySignal) {
   const historyText = historySignal?.quantity
-    ? ` L'historique N-1 indique ${formatNumber(historySignal.quantity)} unités vendues/allouées à ce client, avec ${formatCurrency(historySignal.margin)} de marge.`
+    ? ` L'historique N-1 indique ${formatNumber(historySignal.quantity)} bouteilles achetées par ce client, avec ${formatCurrency(historySignal.margin)} de marge.`
     : "";
   if (score >= 7.8) {
     return `${client.name} peut défendre ${cuvee.name} avec un bon équilibre entre marge, image et potentiel ${market.country}.${historyText}`;
@@ -598,7 +594,7 @@ function renderClients() {
           <dl>
             <div><dt>Volume</dt><dd>${formatNumber(total)} bt</dd></div>
             <div><dt>Marge N</dt><dd>${formatCurrency(projectedMargin)}</dd></div>
-            <div><dt>N-1</dt><dd>${previousQuantity ? `${formatNumber(previousQuantity)} u.` : "Non importé"}</dd></div>
+            <div><dt>N-1</dt><dd>${previousQuantity ? `${formatNumber(previousQuantity)} bt` : "Non importé"}</dd></div>
             <div><dt>Marge N-1</dt><dd>${previousMargin ? formatCurrency(previousMargin) : "-"}</dd></div>
           </dl>
           <button class="secondary-action" type="button" data-view-client="${client.id}">Voir recommandations</button>
@@ -632,7 +628,7 @@ function renderClientView() {
   dom.clientMarket.textContent = market?.country || "-";
   dom.clientScore.textContent = avg ? avg.toFixed(1) : "-";
   dom.clientVolume.textContent = `${formatNumber(total)} bt`;
-  dom.clientPreviousVolume.textContent = previousTotal ? `${formatNumber(previousTotal)} u.` : "-";
+  dom.clientPreviousVolume.textContent = previousTotal ? `${formatNumber(previousTotal)} bt` : "-";
   dom.clientPreviousMargin.textContent = previousMargin ? formatCurrency(previousMargin) : "-";
   dom.clientProjectedMargin.textContent = projectedMargin ? formatCurrency(projectedMargin) : "-";
   dom.clientRows.innerHTML = rows.map(renderClientRecommendationRow).join("") || emptyRow(7);
