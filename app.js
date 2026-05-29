@@ -1002,6 +1002,7 @@ async function handleAvailabilityFile(file) {
 }
 
 function createCuveesFromAvailability(rows) {
+  const touchedIds = new Set();
   const grouped = rows.reduce((acc, row) => {
     const key = normalizeText(row.cuveeName);
     if (!key) return acc;
@@ -1019,7 +1020,8 @@ function createCuveesFromAvailability(rows) {
     if (existing) {
       existing.volume = Math.round(item.allocation);
       existing.availabilityDetails = item.details;
-      existing.cuveeAiSignal = existing.cuveeAiSignal || "Disponibilités importées depuis le fichier année N.";
+      existing.cuveeAiSignal = "Disponibilité N mise à jour depuis le fichier importé.";
+      touchedIds.add(existing.id);
       touched += 1;
       return;
     }
@@ -1041,7 +1043,15 @@ function createCuveesFromAvailability(rows) {
     cuvee.image = profile.image;
     cuvee.cuveeAiSignal = profile.signal;
     state.cuvees.push(cuvee);
+    touchedIds.add(cuvee.id);
     touched += 1;
+  });
+  state.cuvees.forEach((cuvee) => {
+    if (!touchedIds.has(cuvee.id)) {
+      cuvee.volume = 0;
+      cuvee.availabilityDetails = [];
+      cuvee.cuveeAiSignal = "Cuvée conservée pour l'historique N-1, mais absente du fichier de disponibilités N.";
+    }
   });
   return touched;
 }
@@ -1149,9 +1159,16 @@ function createCuveesFromImportedSales(rows) {
     const existing = findCuveeForImportedName(item.name, item.code);
     const avgPrice = item.quantity ? item.turnover / item.quantity : 20;
     const avgCost = item.quantity ? Math.max(0, (item.turnover - item.margin) / item.quantity) : Math.max(1, avgPrice * 0.55);
+    const availability = availabilityForCuveeName(item.name);
+    const hasAvailabilityFile = state.availabilityRows.length > 0;
+    const nVolume = hasAvailabilityFile ? Math.round(availability.allocation) : Math.max(12, Math.round(item.quantity || 0));
     if (existing) {
       existing.importedCode = item.code || existing.importedCode || "";
-      existing.volume = Math.max(Number(existing.volume || 0), Math.round(item.quantity || 0));
+      existing.volume = nVolume;
+      existing.availabilityDetails = hasAvailabilityFile ? availability.details : existing.availabilityDetails;
+      if (hasAvailabilityFile && !availability.allocation) {
+        existing.cuveeAiSignal = "Cuvée présente dans l'historique N-1, conservée avec une disponibilité N à 0 car absente du fichier de disponibilités.";
+      }
       if (!Number(existing.price)) existing.price = roundOne(avgPrice);
       if (!Number(existing.cost)) existing.cost = roundOne(avgCost);
       return;
@@ -1161,13 +1178,16 @@ function createCuveesFromImportedSales(rows) {
       id: uniqueCuveeId(item.name),
       name: item.name,
       importedCode: item.code,
-      volume: Math.max(12, Math.round(item.quantity || 0)),
+      volume: nVolume,
       price: roundOne(avgPrice),
       cost: roundOne(avgCost),
       rarity: 5,
       image: 5,
+      availabilityDetails: hasAvailabilityFile ? availability.details : [],
       cuveeAiUpdatedAt: "",
-      cuveeAiSignal: "Cuvée créée automatiquement depuis l'historique importé."
+      cuveeAiSignal: hasAvailabilityFile && !availability.allocation
+        ? "Cuvée créée depuis l'historique N-1, mais absente du fichier de disponibilités N : volume N à 0."
+        : "Cuvée créée automatiquement depuis l'historique importé."
     };
     const profile = estimateCuveeProfile(cuvee);
     cuvee.rarity = profile.rarity;
@@ -1232,6 +1252,18 @@ function findCuveeForImportedName(name, code) {
       (targetName && (cuveeName.includes(targetName) || targetName.includes(cuveeName)))
     );
   });
+}
+
+function availabilityForCuveeName(name) {
+  const target = normalizeText(name);
+  const rows = state.availabilityRows.filter((row) => {
+    const availableName = normalizeText(row.cuveeName);
+    return availableName === target || availableName.includes(target) || target.includes(availableName);
+  });
+  return {
+    allocation: rows.reduce((sum, row) => sum + Number(row.allocation || 0), 0),
+    details: rows.map((row) => ({ vintage: row.vintage, formatCl: row.formatCl, allocation: row.allocation }))
+  };
 }
 
 function uniqueCuveeId(name) {
