@@ -558,7 +558,8 @@ select:focus {
 .upload-zone {
   position: relative;
   display: grid;
-  min-height: 190px;
+  min-height: 210px;
+  height: 100%;
   place-items: center;
   gap: 8px;
   padding: 26px;
@@ -598,6 +599,7 @@ select:focus {
   margin-top: 12px;
   font-size: 13px;
   font-weight: 700;
+  min-height: 38px;
 }
 
 .history-metrics {
