@@ -40,7 +40,7 @@
       <button class="tab" type="button" data-tab="cuvees">Cuvées</button>
       <button class="tab" type="button" data-tab="markets">Marchés</button>
       <button class="tab" type="button" data-tab="clients">Clients</button>
-      <button class="tab" type="button" data-tab="history">Historique</button>
+      <button class="tab" type="button" data-tab="history">Données téléchargeables</button>
       <button class="tab" type="button" data-tab="client-view">Vue client</button>
     </nav>
 
@@ -186,25 +186,43 @@
     <section id="history" class="panel">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Année précédente</p>
-          <h3>Import ventes et allocations</h3>
+          <p class="eyebrow">Imports Excel</p>
+          <h3>Données téléchargeables</h3>
         </div>
       </div>
       <div class="split-layout">
         <article class="surface">
           <label class="upload-zone" for="salesFile">
             <span>Importer un fichier Excel</span>
-            <strong>Déposer les ventes N-1</strong>
+            <strong>Historique ventes N-1</strong>
             <small>Format attendu : client, pays, cuvée, CA HT, marge, quantité.</small>
             <input id="salesFile" type="file" accept=".xlsx,.xls">
           </label>
           <div class="import-status" id="importStatus">Aucun fichier importé pour le moment.</div>
         </article>
+        <article class="surface">
+          <label class="upload-zone" for="availabilityFile">
+            <span>Importer un fichier Excel</span>
+            <strong>Disponibilités année N</strong>
+            <small>Format attendu : cuvée, millésime, format centilitre, volume allocation.</small>
+            <input id="availabilityFile" type="file" accept=".xlsx,.xls">
+          </label>
+          <div class="import-status" id="availabilityStatus">Aucun fichier de disponibilités importé.</div>
+        </article>
+      </div>
+      <div class="split-layout">
         <article class="surface quiet">
           <h4>Impact IA</h4>
           <p id="historyInsight">
             Les ventes N-1 permettront de pondérer les recommandations avec l'historique réel,
             les volumes déjà alloués, la marge et la fidélité client.
+          </p>
+        </article>
+      </div>
+        <article class="surface quiet">
+          <h4>Disponibilités</h4>
+          <p id="availabilityInsight">
+            Le volume disponible N permettra de limiter les allocations conseillées par cuvée.
           </p>
         </article>
       </div>
@@ -229,6 +247,11 @@
           <strong id="historyMargin">0</strong>
           <small>année précédente</small>
         </article>
+        <article class="metric">
+          <span>Disponibilité N</span>
+          <strong id="availabilityTotal">0</strong>
+          <small>bouteilles disponibles</small>
+        </article>
       </div>
       <div class="surface">
         <div class="surface-header">
@@ -249,6 +272,25 @@
               </tr>
             </thead>
             <tbody id="historyRowsTable"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="surface">
+        <div class="surface-header">
+          <h4>Lecture des disponibilités importées</h4>
+          <button class="secondary-action" type="button" id="clearAvailability">Effacer</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cuvée</th>
+                <th>Millésime</th>
+                <th>Format</th>
+                <th>Volume allocation</th>
+              </tr>
+            </thead>
+            <tbody id="availabilityRowsTable"></tbody>
           </table>
         </div>
       </div>

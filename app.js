@@ -5,6 +5,9 @@ const initialState = {
   previousSales: [],
   previousSalesFileName: "",
   previousSalesImportedAt: "",
+  availabilityRows: [],
+  availabilityFileName: "",
+  availabilityImportedAt: "",
   cuvees: [
     {
       id: "origine",
@@ -191,14 +194,20 @@ const dom = {
   metricMarket: document.querySelector("#metricMarket"),
   metricScore: document.querySelector("#metricScore"),
   salesFile: document.querySelector("#salesFile"),
+  availabilityFile: document.querySelector("#availabilityFile"),
   importStatus: document.querySelector("#importStatus"),
+  availabilityStatus: document.querySelector("#availabilityStatus"),
   historyRows: document.querySelector("#historyRows"),
   historyClients: document.querySelector("#historyClients"),
   historyQuantity: document.querySelector("#historyQuantity"),
   historyMargin: document.querySelector("#historyMargin"),
   historyInsight: document.querySelector("#historyInsight"),
+  availabilityInsight: document.querySelector("#availabilityInsight"),
+  availabilityTotal: document.querySelector("#availabilityTotal"),
   historyRowsTable: document.querySelector("#historyRowsTable"),
+  availabilityRowsTable: document.querySelector("#availabilityRowsTable"),
   clearHistory: document.querySelector("#clearHistory"),
+  clearAvailability: document.querySelector("#clearAvailability"),
   clientMarket: document.querySelector("#clientMarket"),
   clientScore: document.querySelector("#clientScore"),
   clientVolume: document.querySelector("#clientVolume"),
@@ -220,6 +229,9 @@ function normalizeState(nextState) {
   nextState.previousSales = Array.isArray(nextState.previousSales) ? nextState.previousSales : [];
   nextState.previousSalesFileName = nextState.previousSalesFileName ?? "";
   nextState.previousSalesImportedAt = nextState.previousSalesImportedAt ?? "";
+  nextState.availabilityRows = Array.isArray(nextState.availabilityRows) ? nextState.availabilityRows : [];
+  nextState.availabilityFileName = nextState.availabilityFileName ?? "";
+  nextState.availabilityImportedAt = nextState.availabilityImportedAt ?? "";
   nextState.cuvees = nextState.cuvees.map((cuvee) => ({
     ...cuvee,
     rarity: cuvee.rarity ?? 5,
@@ -339,6 +351,10 @@ function projectedMarginForRecommendation(row) {
 
 function projectedMarginForClient(rows) {
   return rows.reduce((sum, row) => sum + projectedMarginForRecommendation(row), 0);
+}
+
+function totalAvailableVolume() {
+  return state.availabilityRows.reduce((sum, row) => sum + Number(row.allocation || 0), 0);
 }
 
 const allocationEngine = {
@@ -471,7 +487,8 @@ function render() {
 
 function renderDashboard() {
   const global = allocationEngine.global();
-  const totalStock = state.cuvees.reduce((sum, cuvee) => sum + Number(cuvee.volume || 0), 0);
+  const availabilityTotal = totalAvailableVolume();
+  const totalStock = availabilityTotal || state.cuvees.reduce((sum, cuvee) => sum + Number(cuvee.volume || 0), 0);
   const top = global.slice(0, 8);
   const allocated = top.reduce((sum, row) => sum + row.volume, 0);
   const avg = top.length ? top.reduce((sum, row) => sum + row.score, 0) / top.length : 0;
@@ -500,20 +517,29 @@ function renderDashboard() {
 
 function renderHistory() {
   const rows = state.previousSales;
+  const availabilityRows = state.availabilityRows;
   const totalQuantity = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
   const totalMargin = rows.reduce((sum, row) => sum + Number(row.margin || 0), 0);
+  const totalAvailability = totalAvailableVolume();
   const clients = new Set(rows.map((row) => normalizeText(row.clientName)).filter(Boolean));
 
   dom.historyRows.textContent = formatNumber(rows.length);
   dom.historyClients.textContent = formatNumber(clients.size);
   dom.historyQuantity.textContent = formatNumber(totalQuantity);
   dom.historyMargin.textContent = formatCurrency(totalMargin);
+  dom.availabilityTotal.textContent = formatNumber(totalAvailability);
   dom.importStatus.textContent = state.previousSalesFileName
     ? `${state.previousSalesFileName} importé le ${state.previousSalesImportedAt}.`
     : "Aucun fichier importé pour le moment.";
   dom.historyInsight.textContent = rows.length
     ? "L'IA utilise maintenant l'historique N-1 pour ajuster les scores : volumes passés, marge réelle, fidélité et articles déjà attribués."
     : "Les ventes N-1 permettront de pondérer les recommandations avec l'historique réel, les volumes déjà alloués, la marge et la fidélité client.";
+  dom.availabilityStatus.textContent = state.availabilityFileName
+    ? `${state.availabilityFileName} importé le ${state.availabilityImportedAt}.`
+    : "Aucun fichier de disponibilités importé.";
+  dom.availabilityInsight.textContent = availabilityRows.length
+    ? `Les disponibilités N alimentent maintenant les cuvées et le dashboard avec ${formatNumber(totalAvailability)} bouteilles disponibles.`
+    : "Le volume disponible N permettra de limiter les allocations conseillées par cuvée.";
   dom.historyRowsTable.innerHTML = rows.slice(0, 60).map((row) => `
     <tr>
       <td>${escapeHtml(row.clientName)}</td>
@@ -525,6 +551,14 @@ function renderHistory() {
       <td>${formatNumber(row.quantity)}</td>
     </tr>
   `).join("") || emptyRow(7);
+  dom.availabilityRowsTable.innerHTML = availabilityRows.slice(0, 80).map((row) => `
+    <tr>
+      <td>${escapeHtml(row.cuveeName)}</td>
+      <td>${escapeHtml(row.vintage || "-")}</td>
+      <td>${escapeHtml(row.formatCl ? `${row.formatCl} cl` : "-")}</td>
+      <td>${formatNumber(row.allocation)} bt</td>
+    </tr>
+  `).join("") || emptyRow(4);
 }
 
 function renderCuvees() {
@@ -950,6 +984,68 @@ async function handleSalesFile(file) {
   }
 }
 
+async function handleAvailabilityFile(file) {
+  if (!file) return;
+  dom.availabilityStatus.textContent = "Lecture du fichier de disponibilités...";
+  try {
+    const rows = await parseAvailabilityFile(file);
+    state.availabilityRows = rows;
+    state.availabilityFileName = file.name;
+    state.availabilityImportedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const cuveeCount = createCuveesFromAvailability(rows);
+    render();
+    showTab("history");
+    dom.availabilityStatus.textContent = `${file.name} importé le ${state.availabilityImportedAt}. ${cuveeCount} cuvée(s) créée(s) ou mise(s) à jour.`;
+  } catch (error) {
+    dom.availabilityStatus.textContent = `Import impossible : ${error.message}`;
+  }
+}
+
+function createCuveesFromAvailability(rows) {
+  const grouped = rows.reduce((acc, row) => {
+    const key = normalizeText(row.cuveeName);
+    if (!key) return acc;
+    if (!acc[key]) {
+      acc[key] = { name: row.cuveeName.trim(), allocation: 0, details: [] };
+    }
+    acc[key].allocation += Number(row.allocation || 0);
+    acc[key].details.push({ vintage: row.vintage, formatCl: row.formatCl, allocation: row.allocation });
+    return acc;
+  }, {});
+
+  let touched = 0;
+  Object.values(grouped).forEach((item) => {
+    const existing = findCuveeForImportedName(item.name, "");
+    if (existing) {
+      existing.volume = Math.round(item.allocation);
+      existing.availabilityDetails = item.details;
+      existing.cuveeAiSignal = existing.cuveeAiSignal || "Disponibilités importées depuis le fichier année N.";
+      touched += 1;
+      return;
+    }
+
+    const cuvee = {
+      id: uniqueCuveeId(item.name),
+      name: item.name,
+      volume: Math.round(item.allocation),
+      price: 20,
+      cost: 9,
+      rarity: 5,
+      image: 5,
+      availabilityDetails: item.details,
+      cuveeAiUpdatedAt: "",
+      cuveeAiSignal: "Cuvée créée automatiquement depuis les disponibilités N."
+    };
+    const profile = estimateCuveeProfile(cuvee);
+    cuvee.rarity = profile.rarity;
+    cuvee.image = profile.image;
+    cuvee.cuveeAiSignal = profile.signal;
+    state.cuvees.push(cuvee);
+    touched += 1;
+  });
+  return touched;
+}
+
 function createClientsFromImportedSales(rows) {
   const existingImportedIds = new Set(state.clients.filter((client) => client.importedFromHistory).map((client) => client.id));
   const grouped = rows.reduce((acc, row) => {
@@ -1169,6 +1265,53 @@ async function parseXlsxSalesFile(file) {
     .filter((row) => row.clientName && (row.turnover || row.margin || row.quantity));
 }
 
+async function parseAvailabilityFile(file) {
+  const entries = readZipEntries(await file.arrayBuffer());
+  const sharedStrings = entries["xl/sharedStrings.xml"] ? parseSharedStrings(await readZipText(entries["xl/sharedStrings.xml"])) : [];
+  const sheetEntry = entries["xl/worksheets/sheet1.xml"];
+  if (!sheetEntry) throw new Error("la première feuille Excel est introuvable.");
+
+  const sheet = new DOMParser().parseFromString(await readZipText(sheetEntry), "application/xml");
+  const rows = Array.from(sheet.getElementsByTagName("row")).map((row) => rowToArray(row, sharedStrings));
+  const headerIndex = rows.findIndex((row) => row.some((cell) => normalizeText(cell).includes("cuvee")) && row.some((cell) => normalizeText(cell).includes("allocation")));
+  if (headerIndex < 0) throw new Error("colonnes de disponibilités introuvables.");
+
+  const headers = rows[headerIndex].map(normalizeText);
+  const cuveeIndex = findHeaderIndex(headers, ["cuvee lib", "cuvee"]);
+  const vintageIndex = findHeaderIndex(headers, ["millesime", "millésime"]);
+  const formatIndex = findHeaderIndex(headers, ["format en centilitre", "format"]);
+  const allocationIndex = findHeaderIndex(headers, ["volume allocation", "allocation"]);
+  if (cuveeIndex < 0 || allocationIndex < 0) throw new Error("colonnes Cuvée Lib ou Volume Allocation manquantes.");
+
+  return rows.slice(headerIndex + 1)
+    .map((row) => ({
+      cuveeName: String(row[cuveeIndex] || "").trim(),
+      vintage: String(row[vintageIndex] || "").trim(),
+      formatCl: parseImportedNumber(row[formatIndex]),
+      allocation: parseImportedNumber(row[allocationIndex])
+    }))
+    .filter((row) => row.cuveeName && row.allocation);
+}
+
+function rowToArray(row, sharedStrings) {
+  const values = [];
+  Array.from(row.getElementsByTagName("c")).forEach((cell) => {
+    const ref = cell.getAttribute("r") || "";
+    const column = ref.match(/[A-Z]+/)?.[0];
+    if (!column) return;
+    values[columnIndex(column)] = cellValue(cell, sharedStrings);
+  });
+  return values;
+}
+
+function columnIndex(column) {
+  return column.split("").reduce((sum, char) => sum * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+function findHeaderIndex(headers, candidates) {
+  return headers.findIndex((header) => candidates.some((candidate) => header === normalizeText(candidate) || header.includes(normalizeText(candidate))));
+}
+
 function rowToSales(row, headers, sharedStrings) {
   const cells = {};
   Array.from(row.getElementsByTagName("c")).forEach((cell) => {
@@ -1318,10 +1461,22 @@ dom.salesFile.addEventListener("change", (event) => {
   event.target.value = "";
 });
 
+dom.availabilityFile.addEventListener("change", (event) => {
+  handleAvailabilityFile(event.target.files[0]);
+  event.target.value = "";
+});
+
 dom.clearHistory.addEventListener("click", () => {
   state.previousSales = [];
   state.previousSalesFileName = "";
   state.previousSalesImportedAt = "";
+  render();
+});
+
+dom.clearAvailability.addEventListener("click", () => {
+  state.availabilityRows = [];
+  state.availabilityFileName = "";
+  state.availabilityImportedAt = "";
   render();
 });
 
