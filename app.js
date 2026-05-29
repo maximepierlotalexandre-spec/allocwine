@@ -197,6 +197,8 @@ const dom = {
   metricScore: document.querySelector("#metricScore"),
   salesFile: document.querySelector("#salesFile"),
   availabilityFile: document.querySelector("#availabilityFile"),
+  salesUploadBadge: document.querySelector("#salesUploadBadge"),
+  availabilityUploadBadge: document.querySelector("#availabilityUploadBadge"),
   importStatus: document.querySelector("#importStatus"),
   availabilityStatus: document.querySelector("#availabilityStatus"),
   historyRows: document.querySelector("#historyRows"),
@@ -532,6 +534,8 @@ function renderHistory() {
   dom.historyQuantity.textContent = formatNumber(totalQuantity);
   dom.historyMargin.textContent = formatCurrency(totalMargin);
   dom.availabilityTotal.textContent = formatNumber(totalAvailability);
+  updateUploadState(dom.salesFile, dom.salesUploadBadge, state.previousSalesFileName, state.previousSalesImportSummary);
+  updateUploadState(dom.availabilityFile, dom.availabilityUploadBadge, state.availabilityFileName, state.availabilityImportSummary);
   dom.importStatus.textContent = state.previousSalesFileName
     ? `${state.previousSalesFileName} importé le ${state.previousSalesImportedAt}. ${state.previousSalesImportSummary}`
     : "Aucun fichier importé pour le moment.";
@@ -563,6 +567,14 @@ function renderHistory() {
       <td>${formatNumber(row.allocation)} bt</td>
     </tr>
   `).join("") || emptyRow(4);
+}
+
+function updateUploadState(input, badge, fileName, summary) {
+  const zone = input?.closest(".upload-zone");
+  if (!zone || !badge) return;
+  zone.classList.toggle("has-file", Boolean(fileName));
+  badge.textContent = fileName ? `Chargé : ${fileName}` : "Aucun fichier chargé";
+  badge.title = summary || "";
 }
 
 function renderCuvees() {
@@ -984,7 +996,7 @@ async function handleSalesFile(file) {
     const countryCount = new Set(rows.map((row) => normalizeText(row.countryName)).filter(Boolean)).size;
     const historicalVolume = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
     const historicalMargin = rows.reduce((sum, row) => sum + Number(row.margin || 0), 0);
-    state.previousSalesImportSummary = `${formatNumber(rows.length)} lignes lues, ${formatNumber(clientCount)} clients détectés, ${formatNumber(countryCount)} pays, ${formatNumber(createdCount)} clients créés, ${formatNumber(marketCount)} marchés créés, ${formatNumber(cuveeCount)} cuvées créées/mises à jour, ${formatNumber(historicalVolume)} bt N-1, ${formatCurrency(historicalMargin)} de marge N-1.`;
+    state.previousSalesImportSummary = `${formatNumber(rows.length)} lignes lues. Données envoyées vers Clients, Marchés, Cuvées, Vue client et Dashboard : ${formatNumber(clientCount)} clients détectés, ${formatNumber(countryCount)} pays, ${formatNumber(createdCount)} clients créés, ${formatNumber(marketCount)} marchés créés, ${formatNumber(cuveeCount)} cuvées créées/mises à jour, ${formatNumber(historicalVolume)} bt N-1, ${formatCurrency(historicalMargin)} de marge N-1.`;
     render();
     showTab("history");
     dom.importStatus.textContent = `${file.name} importé le ${state.previousSalesImportedAt}. ${state.previousSalesImportSummary}`;
@@ -1003,9 +1015,10 @@ async function handleAvailabilityFile(file) {
     state.availabilityImportedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
     const cuveeCount = createCuveesFromAvailability(rows);
     const availabilityVolume = rows.reduce((sum, row) => sum + Number(row.allocation || 0), 0);
+    const distinctCuvees = new Set(rows.map((row) => normalizeText(row.cuveeName)).filter(Boolean)).size;
     const vintageCount = new Set(rows.map((row) => normalizeText(row.vintage)).filter(Boolean)).size;
     const formatCount = new Set(rows.map((row) => normalizeText(row.formatCl)).filter(Boolean)).size;
-    state.availabilityImportSummary = `${formatNumber(rows.length)} lignes lues, ${formatNumber(cuveeCount)} cuvées créées/mises à jour, ${formatNumber(availabilityVolume)} bt disponibles N, ${formatNumber(vintageCount)} millésimes, ${formatNumber(formatCount)} formats. Les cuvées absentes passent à 0 bt sans suppression.`;
+    state.availabilityImportSummary = `${formatNumber(rows.length)} lignes lues. Données envoyées vers Cuvées, Dashboard et Vue client : ${formatNumber(distinctCuvees)} cuvées détectées, ${formatNumber(cuveeCount)} cuvées créées/mises à jour, ${formatNumber(availabilityVolume)} bt disponibles N au total, ${formatNumber(vintageCount)} millésimes, ${formatNumber(formatCount)} formats. Les cuvées absentes du fichier de disponibilités passent à 0 bt sans être supprimées.`;
     render();
     showTab("history");
     dom.availabilityStatus.textContent = `${file.name} importé le ${state.availabilityImportedAt}. ${state.availabilityImportSummary}`;

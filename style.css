@@ -588,6 +588,32 @@ select:focus {
   line-height: 1.4;
 }
 
+.upload-zone em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.upload-zone.has-file {
+  border-color: rgba(32, 122, 77, 0.45);
+  background: #f7fbf8;
+}
+
+.upload-zone.has-file em {
+  border-color: rgba(32, 122, 77, 0.25);
+  background: #eaf6ef;
+  color: var(--green);
+}
+
 .upload-zone input {
   position: absolute;
   inset: 0;
