@@ -1,7 +1,10 @@
-const STORAGE_KEY = "allocwine.workspace.v1";
+﻿const STORAGE_KEY = "allocwine.workspace.v1";
 
 const initialState = {
   selectedClientId: "firadis",
+  previousSales: [],
+  previousSalesFileName: "",
+  previousSalesImportedAt: "",
   cuvees: [
     {
       id: "origine",
@@ -187,6 +190,15 @@ const dom = {
   metricAllocated: document.querySelector("#metricAllocated"),
   metricMarket: document.querySelector("#metricMarket"),
   metricScore: document.querySelector("#metricScore"),
+  salesFile: document.querySelector("#salesFile"),
+  importStatus: document.querySelector("#importStatus"),
+  historyRows: document.querySelector("#historyRows"),
+  historyClients: document.querySelector("#historyClients"),
+  historyQuantity: document.querySelector("#historyQuantity"),
+  historyMargin: document.querySelector("#historyMargin"),
+  historyInsight: document.querySelector("#historyInsight"),
+  historyRowsTable: document.querySelector("#historyRowsTable"),
+  clearHistory: document.querySelector("#clearHistory"),
   clientMarket: document.querySelector("#clientMarket"),
   clientScore: document.querySelector("#clientScore"),
   clientVolume: document.querySelector("#clientVolume")
@@ -202,6 +214,9 @@ function loadState() {
 }
 
 function normalizeState(nextState) {
+  nextState.previousSales = Array.isArray(nextState.previousSales) ? nextState.previousSales : [];
+  nextState.previousSalesFileName = nextState.previousSalesFileName ?? "";
+  nextState.previousSalesImportedAt = nextState.previousSalesImportedAt ?? "";
   nextState.cuvees = nextState.cuvees.map((cuvee) => ({
     ...cuvee,
     rarity: cuvee.rarity ?? 5,
@@ -233,8 +248,21 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString("fr-FR");
 }
 
+function formatCurrency(value) {
+  return Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " €";
+}
+
 function clamp(value, min = 0, max = 10) {
   return Math.max(min, Math.min(max, Number(value || 0)));
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function createId(prefix) {
@@ -247,6 +275,21 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function salesForClient(client) {
+  const clientName = normalizeText(client.name);
+  return state.previousSales.filter((row) => {
+    const saleClient = normalizeText(row.clientName);
+    return saleClient === clientName || saleClient.includes(clientName) || clientName.includes(saleClient);
+  });
+}
+
+function articleMatchesCuvee(articleCode, cuveeName) {
+  const article = normalizeText(articleCode);
+  const cuvee = normalizeText(cuveeName);
+  if (!article || !cuvee) return false;
+  return article.includes(cuvee) || cuvee.includes(article) || cuvee.split(" ").some((part) => part.length > 3 && article.includes(part));
 }
 
 const allocationEngine = {
@@ -263,7 +306,8 @@ const allocationEngine = {
     const market = this.marketForClient(client);
     const margin = this.grossMargin(cuvee) * 0.52 + Number(client.margin) * 0.48;
     const brandFit = Number(cuvee.image) * 0.34 + Number(market.image) * 0.36 + Number(client.network) * 0.30;
-    const relationship = Number(client.history) * 0.55 + Number(client.payment) * 0.45;
+    const historySignal = this.historySignal(client, cuvee);
+    const relationship = Number(client.history) * 0.40 + Number(client.payment) * 0.35 + historySignal.score * 0.25;
     const riskPenalty = this.riskPenalty(market);
     const rarityBonus = Number(cuvee.rarity) >= 8 && Number(client.strategicPotential) >= 8 ? 0.28 : 0;
 
@@ -288,6 +332,31 @@ const allocationEngine = {
     return activeRisks.reduce((sum, value) => sum + value, 0) * 0.18;
   },
 
+  historySignal(client, cuvee) {
+    const rows = salesForClient(client);
+    if (!rows.length) {
+      return { score: Number(client.history || 5), quantity: 0, margin: 0, turnover: 0, matchedArticle: false };
+    }
+
+    const totalQuantity = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+    const totalMargin = rows.reduce((sum, row) => sum + Number(row.margin || 0), 0);
+    const totalTurnover = rows.reduce((sum, row) => sum + Number(row.turnover || 0), 0);
+    const articleRows = rows.filter((row) => row.articleCode && articleMatchesCuvee(row.articleCode, cuvee.name));
+    const articleQuantity = articleRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+    const marginRate = totalTurnover ? totalMargin / totalTurnover : 0;
+    const quantityScore = clamp(Math.log10(Math.max(totalQuantity, 1)) * 2.2, 1, 10);
+    const marginScore = clamp(marginRate * 10, 1, 10);
+    const articleBonus = articleRows.length ? 1.1 + clamp(articleQuantity / 120, 0, 1.4) : 0;
+
+    return {
+      score: clamp(quantityScore * 0.45 + marginScore * 0.35 + Number(client.history || 5) * 0.20 + articleBonus, 1, 10),
+      quantity: totalQuantity,
+      margin: totalMargin,
+      turnover: totalTurnover,
+      matchedArticle: articleRows.length > 0
+    };
+  },
+
   volume(cuvee, score) {
     const rarity = Number(cuvee.rarity);
     const baseRatio = rarity >= 9 ? 0.065 : rarity >= 7 ? 0.11 : 0.17;
@@ -297,6 +366,7 @@ const allocationEngine = {
 
   recommendation(cuvee, client) {
     const score = this.score(cuvee, client);
+    const historySignal = this.historySignal(client, cuvee);
     return {
       cuvee,
       client,
@@ -304,7 +374,8 @@ const allocationEngine = {
       score,
       volume: this.volume(cuvee, score),
       decision: decisionForScore(score),
-      analysis: analysisFor(cuvee, client, this.marketForClient(client), score)
+      analysis: analysisFor(cuvee, client, this.marketForClient(client), score, historySignal),
+      historySignal
     };
   },
 
@@ -327,22 +398,25 @@ function decisionForScore(score) {
   return { label: "Limiter", tone: "low" };
 }
 
-function analysisFor(cuvee, client, market, score) {
+function analysisFor(cuvee, client, market, score, historySignal) {
+  const historyText = historySignal?.quantity
+    ? ` L'historique N-1 indique ${formatNumber(historySignal.quantity)} unités vendues/allouées à ce client, avec ${formatCurrency(historySignal.margin)} de marge.`
+    : "";
   if (score >= 7.8) {
-    return `${client.name} peut défendre ${cuvee.name} avec un bon équilibre entre marge, image et potentiel ${market.country}.`;
+    return `${client.name} peut défendre ${cuvee.name} avec un bon équilibre entre marge, image et potentiel ${market.country}.${historyText}`;
   }
   if (score >= 6.4) {
-    return `${cuvee.name} reste pertinente, avec une allocation mesurée et un suivi du risque ${market.country}.`;
+    return `${cuvee.name} reste pertinente, avec une allocation mesurée et un suivi du risque ${market.country}.${historyText}`;
   }
-  return `Allocation prudente conseillée : le couple marge, risque et potentiel ne justifie pas un volume élevé.`;
+  return `Allocation prudente conseillée : le couple marge, risque et potentiel ne justifie pas un volume élevé.${historyText}`;
 }
-
 function render() {
   persist();
   renderDashboard();
   renderCuvees();
   renderMarkets();
   renderClients();
+  renderHistory();
   renderClientView();
 }
 
@@ -373,6 +447,33 @@ function renderDashboard() {
     : "Ajoutez des cuvées, marchés et clients pour générer une lecture stratégique.";
 
   dom.topRows.innerHTML = top.map(renderRecommendationRow).join("") || emptyRow(6);
+}
+
+function renderHistory() {
+  const rows = state.previousSales;
+  const totalQuantity = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  const totalMargin = rows.reduce((sum, row) => sum + Number(row.margin || 0), 0);
+  const clients = new Set(rows.map((row) => normalizeText(row.clientName)).filter(Boolean));
+
+  dom.historyRows.textContent = formatNumber(rows.length);
+  dom.historyClients.textContent = formatNumber(clients.size);
+  dom.historyQuantity.textContent = formatNumber(totalQuantity);
+  dom.historyMargin.textContent = formatCurrency(totalMargin);
+  dom.importStatus.textContent = state.previousSalesFileName
+    ? `${state.previousSalesFileName} importé le ${state.previousSalesImportedAt}.`
+    : "Aucun fichier importé pour le moment.";
+  dom.historyInsight.textContent = rows.length
+    ? "L'IA utilise maintenant l'historique N-1 pour ajuster les scores : volumes passés, marge réelle, fidélité et articles déjà attribués."
+    : "Les ventes N-1 permettront de pondérer les recommandations avec l'historique réel, les volumes déjà alloués, la marge et la fidélité client.";
+  dom.historyRowsTable.innerHTML = rows.slice(0, 60).map((row) => `
+    <tr>
+      <td>${escapeHtml(row.clientName)}</td>
+      <td>${escapeHtml(row.articleCode || "-")}</td>
+      <td>${formatCurrency(row.turnover)}</td>
+      <td>${formatCurrency(row.margin)}</td>
+      <td>${formatNumber(row.quantity)}</td>
+    </tr>
+  `).join("") || emptyRow(5);
 }
 
 function renderCuvees() {
@@ -424,6 +525,8 @@ function renderClients() {
     .map((client) => {
       const market = allocationEngine.marketForClient(client);
       const rows = allocationEngine.byClient(client);
+      const previousRows = salesForClient(client);
+      const previousQuantity = previousRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
       const total = rows.reduce((sum, row) => sum + row.volume, 0);
       const avg = rows.length ? rows.reduce((sum, row) => sum + row.score, 0) / rows.length : 0;
       return `
@@ -438,7 +541,7 @@ function renderClients() {
           <dl>
             <div><dt>Volume</dt><dd>${formatNumber(total)} bt</dd></div>
             <div><dt>Historique</dt><dd>${client.history}/10</dd></div>
-            <div><dt>Potentiel</dt><dd>${client.strategicPotential}/10</dd></div>
+            <div><dt>N-1</dt><dd>${previousQuantity ? `${formatNumber(previousQuantity)} u.` : "Non importé"}</dd></div>
           </dl>
           <button class="secondary-action" type="button" data-view-client="${client.id}">Voir recommandations</button>
         </article>
@@ -765,6 +868,135 @@ function addClient() {
   render();
 }
 
+async function handleSalesFile(file) {
+  if (!file) return;
+  dom.importStatus.textContent = "Lecture du fichier Excel...";
+  try {
+    const rows = await parseXlsxSalesFile(file);
+    state.previousSales = rows;
+    state.previousSalesFileName = file.name;
+    state.previousSalesImportedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    render();
+    showTab("history");
+  } catch (error) {
+    dom.importStatus.textContent = `Import impossible : ${error.message}`;
+  }
+}
+
+async function parseXlsxSalesFile(file) {
+  const entries = readZipEntries(await file.arrayBuffer());
+  const sharedStrings = entries["xl/sharedStrings.xml"] ? parseSharedStrings(await readZipText(entries["xl/sharedStrings.xml"])) : [];
+  const sheetEntry = entries["xl/worksheets/sheet1.xml"];
+  if (!sheetEntry) throw new Error("la première feuille Excel est introuvable.");
+
+  const tableHeaders = entries["xl/tables/table1.xml"] ? parseTableHeaders(await readZipText(entries["xl/tables/table1.xml"])) : [];
+  const headers = tableHeaders.length ? tableHeaders : ["Nom + Prénom Client", "Code article", "TOTAL(Mt Ht)", "TOTAL(Marge)", "TOTAL(Quantité)"];
+  const sheet = new DOMParser().parseFromString(await readZipText(sheetEntry), "application/xml");
+  const rows = Array.from(sheet.getElementsByTagName("row"));
+
+  return rows
+    .map((row) => rowToSales(row, headers, sharedStrings))
+    .filter((row) => row.clientName && (row.turnover || row.margin || row.quantity));
+}
+
+function rowToSales(row, headers, sharedStrings) {
+  const cells = {};
+  Array.from(row.getElementsByTagName("c")).forEach((cell) => {
+    const ref = cell.getAttribute("r") || "";
+    const column = ref.match(/[A-Z]+/)?.[0];
+    if (column) cells[column] = cellValue(cell, sharedStrings);
+  });
+
+  const values = ["A", "B", "C", "D", "E"].reduce((acc, column, index) => {
+    acc[headers[index] || column] = cells[column] ?? "";
+    return acc;
+  }, {});
+
+  return {
+    clientName: String(values["Nom + Prénom Client"] || values.A || "").trim(),
+    articleCode: String(values["Code article"] || values.B || "").trim(),
+    turnover: parseImportedNumber(values["TOTAL(Mt Ht)"] ?? values.C),
+    margin: parseImportedNumber(values["TOTAL(Marge)"] ?? values.D),
+    quantity: parseImportedNumber(values["TOTAL(Quantité)"] ?? values.E)
+  };
+}
+
+function cellValue(cell, sharedStrings) {
+  const value = cell.getElementsByTagName("v")[0]?.textContent ?? "";
+  if (cell.getAttribute("t") === "s") return sharedStrings[Number(value)] ?? "";
+  if (cell.getAttribute("t") === "inlineStr") return cell.getElementsByTagName("t")[0]?.textContent ?? "";
+  return value;
+}
+
+function parseImportedNumber(value) {
+  const number = Number(String(value ?? "").replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function parseSharedStrings(xmlText) {
+  const xml = new DOMParser().parseFromString(xmlText, "application/xml");
+  return Array.from(xml.getElementsByTagName("si")).map((item) =>
+    Array.from(item.getElementsByTagName("t")).map((node) => node.textContent || "").join("")
+  );
+}
+
+function parseTableHeaders(xmlText) {
+  const xml = new DOMParser().parseFromString(xmlText, "application/xml");
+  return Array.from(xml.getElementsByTagName("tableColumn")).map((column) => column.getAttribute("name") || "");
+}
+
+function readZipEntries(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 66000); i -= 1) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("format XLSX non reconnu.");
+
+  const entries = {};
+  const totalEntries = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  for (let i = 0; i < totalEntries; i += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) break;
+    const compression = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const uncompressedSize = view.getUint32(offset + 24, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+    entries[name] = { buffer, compression, compressedSize, uncompressedSize, localOffset };
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+async function readZipText(entry) {
+  const bytes = new Uint8Array(entry.buffer);
+  const view = new DataView(entry.buffer);
+  const localOffset = entry.localOffset;
+  if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error("entrée XLSX invalide.");
+  const nameLength = view.getUint16(localOffset + 26, true);
+  const extraLength = view.getUint16(localOffset + 28, true);
+  const start = localOffset + 30 + nameLength + extraLength;
+  const compressed = bytes.slice(start, start + entry.compressedSize);
+  let output;
+  if (entry.compression === 0) {
+    output = compressed;
+  } else if (entry.compression === 8 && "DecompressionStream" in window) {
+    const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    output = new Uint8Array(await new Response(stream).arrayBuffer());
+  } else {
+    throw new Error("compression Excel non supportée par ce navigateur.");
+  }
+  return new TextDecoder("utf-8").decode(output);
+}
+
 document.addEventListener("input", (event) => {
   if (event.target.matches("[data-edit]")) updateField(event.target);
 });
@@ -794,6 +1026,18 @@ dom.clientSelector.addEventListener("change", (event) => {
   render();
 });
 
+dom.salesFile.addEventListener("change", (event) => {
+  handleSalesFile(event.target.files[0]);
+  event.target.value = "";
+});
+
+dom.clearHistory.addEventListener("click", () => {
+  state.previousSales = [];
+  state.previousSalesFileName = "";
+  state.previousSalesImportedAt = "";
+  render();
+});
+
 document.querySelector("#addCuvee").addEventListener("click", addCuvee);
 document.querySelector("#addMarket").addEventListener("click", addMarket);
 document.querySelector("#addClient").addEventListener("click", addClient);
@@ -801,3 +1045,4 @@ document.querySelector("#analyzeCuvees").addEventListener("click", runAllCuveeAi
 document.querySelector("#analyzeMarkets").addEventListener("click", runAllMarketAi);
 
 render();
+

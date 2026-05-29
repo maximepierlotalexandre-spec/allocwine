@@ -555,6 +555,55 @@ select:focus {
   margin-bottom: 8px;
 }
 
+.upload-zone {
+  position: relative;
+  display: grid;
+  min-height: 190px;
+  place-items: center;
+  gap: 8px;
+  padding: 26px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: #fbfbfd;
+  text-align: center;
+  cursor: pointer;
+}
+
+.upload-zone span {
+  color: var(--wine);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.upload-zone strong {
+  font-size: 24px;
+}
+
+.upload-zone small,
+.import-status {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.upload-zone input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.import-status {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.history-metrics {
+  margin-top: 12px;
+}
+
 .empty-state {
   padding: 28px;
   color: var(--muted);
