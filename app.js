@@ -5,9 +5,11 @@ const initialState = {
   previousSales: [],
   previousSalesFileName: "",
   previousSalesImportedAt: "",
+  previousSalesImportSummary: "",
   availabilityRows: [],
   availabilityFileName: "",
   availabilityImportedAt: "",
+  availabilityImportSummary: "",
   cuvees: [
     {
       id: "origine",
@@ -229,9 +231,11 @@ function normalizeState(nextState) {
   nextState.previousSales = Array.isArray(nextState.previousSales) ? nextState.previousSales : [];
   nextState.previousSalesFileName = nextState.previousSalesFileName ?? "";
   nextState.previousSalesImportedAt = nextState.previousSalesImportedAt ?? "";
+  nextState.previousSalesImportSummary = nextState.previousSalesImportSummary ?? "";
   nextState.availabilityRows = Array.isArray(nextState.availabilityRows) ? nextState.availabilityRows : [];
   nextState.availabilityFileName = nextState.availabilityFileName ?? "";
   nextState.availabilityImportedAt = nextState.availabilityImportedAt ?? "";
+  nextState.availabilityImportSummary = nextState.availabilityImportSummary ?? "";
   nextState.cuvees = nextState.cuvees.map((cuvee) => ({
     ...cuvee,
     rarity: cuvee.rarity ?? 5,
@@ -529,13 +533,13 @@ function renderHistory() {
   dom.historyMargin.textContent = formatCurrency(totalMargin);
   dom.availabilityTotal.textContent = formatNumber(totalAvailability);
   dom.importStatus.textContent = state.previousSalesFileName
-    ? `${state.previousSalesFileName} importé le ${state.previousSalesImportedAt}.`
+    ? `${state.previousSalesFileName} importé le ${state.previousSalesImportedAt}. ${state.previousSalesImportSummary}`
     : "Aucun fichier importé pour le moment.";
   dom.historyInsight.textContent = rows.length
     ? "L'IA utilise maintenant l'historique N-1 pour ajuster les scores : volumes passés, marge réelle, fidélité et articles déjà attribués."
     : "Les ventes N-1 permettront de pondérer les recommandations avec l'historique réel, les volumes déjà alloués, la marge et la fidélité client.";
   dom.availabilityStatus.textContent = state.availabilityFileName
-    ? `${state.availabilityFileName} importé le ${state.availabilityImportedAt}.`
+    ? `${state.availabilityFileName} importé le ${state.availabilityImportedAt}. ${state.availabilityImportSummary}`
     : "Aucun fichier de disponibilités importé.";
   dom.availabilityInsight.textContent = availabilityRows.length
     ? `Les disponibilités N alimentent maintenant les cuvées et le dashboard avec ${formatNumber(totalAvailability)} bouteilles disponibles.`
@@ -976,9 +980,14 @@ async function handleSalesFile(file) {
     const marketCount = createMarketsFromImportedSales(rows);
     const cuveeCount = createCuveesFromImportedSales(rows);
     const createdCount = createClientsFromImportedSales(rows);
+    const clientCount = new Set(rows.map((row) => normalizeText(row.clientName)).filter(Boolean)).size;
+    const countryCount = new Set(rows.map((row) => normalizeText(row.countryName)).filter(Boolean)).size;
+    const historicalVolume = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+    const historicalMargin = rows.reduce((sum, row) => sum + Number(row.margin || 0), 0);
+    state.previousSalesImportSummary = `${formatNumber(rows.length)} lignes lues, ${formatNumber(clientCount)} clients détectés, ${formatNumber(countryCount)} pays, ${formatNumber(createdCount)} clients créés, ${formatNumber(marketCount)} marchés créés, ${formatNumber(cuveeCount)} cuvées créées/mises à jour, ${formatNumber(historicalVolume)} bt N-1, ${formatCurrency(historicalMargin)} de marge N-1.`;
     render();
     showTab("history");
-    dom.importStatus.textContent = `${file.name} importé le ${state.previousSalesImportedAt}. ${createdCount} client(s), ${marketCount} marché(s), ${cuveeCount} cuvée(s) créé(s). Données existantes enrichies.`;
+    dom.importStatus.textContent = `${file.name} importé le ${state.previousSalesImportedAt}. ${state.previousSalesImportSummary}`;
   } catch (error) {
     dom.importStatus.textContent = `Import impossible : ${error.message}`;
   }
@@ -993,9 +1002,13 @@ async function handleAvailabilityFile(file) {
     state.availabilityFileName = file.name;
     state.availabilityImportedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
     const cuveeCount = createCuveesFromAvailability(rows);
+    const availabilityVolume = rows.reduce((sum, row) => sum + Number(row.allocation || 0), 0);
+    const vintageCount = new Set(rows.map((row) => normalizeText(row.vintage)).filter(Boolean)).size;
+    const formatCount = new Set(rows.map((row) => normalizeText(row.formatCl)).filter(Boolean)).size;
+    state.availabilityImportSummary = `${formatNumber(rows.length)} lignes lues, ${formatNumber(cuveeCount)} cuvées créées/mises à jour, ${formatNumber(availabilityVolume)} bt disponibles N, ${formatNumber(vintageCount)} millésimes, ${formatNumber(formatCount)} formats. Les cuvées absentes passent à 0 bt sans suppression.`;
     render();
     showTab("history");
-    dom.availabilityStatus.textContent = `${file.name} importé le ${state.availabilityImportedAt}. ${cuveeCount} cuvée(s) créée(s) ou mise(s) à jour.`;
+    dom.availabilityStatus.textContent = `${file.name} importé le ${state.availabilityImportedAt}. ${state.availabilityImportSummary}`;
   } catch (error) {
     dom.availabilityStatus.textContent = `Import impossible : ${error.message}`;
   }
@@ -1502,6 +1515,7 @@ dom.clearHistory.addEventListener("click", () => {
   state.previousSales = [];
   state.previousSalesFileName = "";
   state.previousSalesImportedAt = "";
+  state.previousSalesImportSummary = "";
   render();
 });
 
@@ -1509,6 +1523,7 @@ dom.clearAvailability.addEventListener("click", () => {
   state.availabilityRows = [];
   state.availabilityFileName = "";
   state.availabilityImportedAt = "";
+  state.availabilityImportSummary = "";
   render();
 });
 

@@ -597,9 +597,13 @@ select:focus {
 
 .import-status {
   margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfbfd;
   font-size: 13px;
   font-weight: 700;
-  min-height: 38px;
+  min-height: 74px;
 }
 
 .history-metrics {
